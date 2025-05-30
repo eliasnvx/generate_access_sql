@@ -28,8 +28,9 @@ python3 generate_access_sql.py -j locations.json -c contacts_region1.csv contact
 ```json
 {
     "locations": [
-        {"phone": "+37128550090"},
-        {"phone": "+37064671293"}
+        {"phone": "+37128550090", "name": "Gate 1"},
+        {"phone": "+37064671293", "name": "Gate 2"},
+        {"phone": "+37061591061", "name": "Gate 3"}
     ]
 }
 ```
@@ -79,8 +80,9 @@ python3 generate_access_sql.py -j locations.json -c contacts_region1.csv contact
 ```json
 {
     "locations": [
-        {"phone": "+37128550090"},
-        {"phone": "+37064671293"}
+        {"phone": "+37128550090", "name": "Gate 1"},
+        {"phone": "+37064671293", "name": "Gate 2"},
+        {"phone": "+37061591061", "name": "Gate 3"}
     ]
 }
 ```
