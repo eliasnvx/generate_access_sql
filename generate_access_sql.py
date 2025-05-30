@@ -37,19 +37,42 @@ def load_locations(json_path):
     if 'locations' not in data or not isinstance(data['locations'], list):
         logging.error(f"JSON {json_path} has no 'locations' key or it's not a list!")
         sys.exit(1)
-    phones = []
+    
+    locations = {}
+    
     for i, loc in enumerate(data['locations']):
-        p = normalize_phone(loc.get('phone', ''))
-        if not p:
+        phone = normalize_phone(loc.get('phone', ''))
+        if not phone:
             logging.warning(f"Location #{i+1}: no gate phone (phone)")
-        phones.append(p if p else None)
-    return phones
+        
+        name = loc.get('name', '').strip()
+        if not name:
+            logging.warning(f"Location #{i+1}: no name")
+            continue
+            
+        address = None
+        if '(' in name and ')' in name:
+            address = name[name.find('(')+1:name.find(')')].strip()
+        
+        if address:
+            address_key = address.lower().replace('  ', ' ')
+            locations[address_key] = phone
+            
+            short_address = address_key.split(',')[0].strip()
+            if short_address != address_key:
+                locations[short_address] = phone
+
+        locations[name.lower()] = phone
+        locations[str(i+1)] = phone
+    
+    logging.info(f"Loaded {len(locations)} location addresses from {json_path}")
+    return locations
 
 
-def process_csv(file_path, loc_phones, seen, sql_lines):
+def process_csv(file_path, locations, seen, sql_lines):
     required_fields = [
         'First Name', 'Last Name', 'Company Name', 'Display Name',
-        'Phone', 'MobilePhone', 'CF.Noliktavas numurs', 'CF.Storage number'
+        'Phone', 'MobilePhone'
     ]
     try:
         with open(file_path, newline='', encoding='utf-8') as f:
@@ -57,25 +80,39 @@ def process_csv(file_path, loc_phones, seen, sql_lines):
             missing = [field for field in required_fields if field not in reader.fieldnames]
             if missing:
                 logging.warning(f"{file_path}: missing fields: {', '.join(missing)}")
+            
             for row_num, row in enumerate(reader, 2):
-                raw_idx = row.get('CF.Noliktavas numurs') or row.get('CF.Storage number') or ''
-                try:
-                    idx = int(float(raw_idx)) - 1
-                except Exception:
-                    logging.warning(f"{file_path}:{row_num}: invalid storage index '{raw_idx}'")
-                    continue
-                if idx < 0 or idx >= len(loc_phones):
-                    logging.warning(f"{file_path}:{row_num}: index {idx+1} out of range")
-                    continue
-                gate_phone = loc_phones[idx]
-                if not gate_phone:
-                    gate_phone = normalize_phone(row.get('GatePhone') or row.get('Gate Phone') or '')
-                if not gate_phone:
-                    logging.warning(f"{file_path}:{row_num}: no gate phone")
-                    continue
                 client_phone = normalize_phone(row.get('Phone') or row.get('MobilePhone') or '')
                 if not client_phone:
                     logging.warning(f"{file_path}:{row_num}: no client phone")
+                    continue
+                
+                storage_location = (row.get('CF.Storage location') or row.get('CF.Noliktavas lokācija') or '').strip()
+                if not storage_location:
+                    logging.warning(f"{file_path}:{row_num}: no storage location")
+                    continue
+                
+                storage_location_key = storage_location.lower().replace('  ', ' ')
+                
+                gate_phone = None
+                
+                if storage_location_key in locations:
+                    gate_phone = locations[storage_location_key]
+                else:
+                    short_location = storage_location_key.split(',')[0].strip()
+                    if short_location in locations:
+                        gate_phone = locations[short_location]
+                    else:
+                        storage_number = row.get('CF.Noliktavas numurs') or row.get('CF.Storage number') or ''
+                        if storage_number and storage_number in locations:
+                            gate_phone = locations[storage_number]
+
+                if not gate_phone:
+                    gate_phone = normalize_phone(row.get('GatePhone') or row.get('Gate Phone') or 
+                                               row.get('CF.Gate number') or row.get('CF.Gate phone 1') or '')
+                
+                if not gate_phone:
+                    logging.warning(f"{file_path}:{row_num}: no gate phone for location '{storage_location}'")
                     continue
                 first = row.get('First Name', '').strip()
                 last = row.get('Last Name', '').strip()
@@ -109,6 +146,7 @@ def main():
     parser.add_argument('-c', '--csv', nargs='+', required=True, help='Paths to CSV files')
     parser.add_argument('-o', '--output', default='restore_access_final.sql', help='Output SQL file')
     parser.add_argument('--log', default='INFO', help='Log level: DEBUG, INFO, WARNING, ERROR')
+    parser.add_argument('--verbose', action='store_true', help='Show detailed matching information')
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -116,12 +154,12 @@ def main():
         format='[%(levelname)s] %(message)s'
     )
 
-    loc_phones = load_locations(args.json)
+    locations = load_locations(args.json)
     seen = set()
     sql_lines = []
 
     for csv_file in args.csv:
-        process_csv(csv_file, loc_phones, seen, sql_lines)
+        process_csv(csv_file, locations, seen, sql_lines)
 
     try:
         with open(args.output, 'w', encoding='utf-8') as out:
