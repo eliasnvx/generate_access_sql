@@ -1,0 +1,2 @@
+# To run the script, you need to have Python 3.x installed
+# Only standard libraries are used: argparse, csv, json, sys, logging
